@@ -3,7 +3,7 @@
  * Plugin Name: Pincode Checker for WooCommerce
  * Plugin URI:  https://github.com/akinich/Pincode-checker-for-woocommerce
  * Description: Dynamically validates customer pincodes against WooCommerce Shipping Zones (exact codes, ranges, and wildcards) with live session sync, cart recalculation, native Elementor widget, auto-placement settings, mobile delivery strip, prominent 1-click geolocation, checkout protection, cross-platform GPS binding, and REST APIs for native mobile apps.
- * Version:     1.3.6
+ * Version:     1.3.7
  * Author:      Akhil Nichani
  * Author URI:  https://github.com/akinich
  * Text Domain: pincode-checker-for-woocommerce
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define Plugin Constants.
-define( 'WC_PINCODE_CHECKER_VERSION', '1.3.6' );
+define( 'WC_PINCODE_CHECKER_VERSION', '1.3.7' );
 define( 'WC_PINCODE_CHECKER_PLUGIN_FILE', __FILE__ );
 define( 'WC_PINCODE_CHECKER_PLUGIN_PATH', plugin_dir_path( __FILE__ ) );
 define( 'WC_PINCODE_CHECKER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -1027,6 +1027,22 @@ final class WC_Pincode_Checker {
 	}
 
 	/**
+	 * Validate latitude and longitude coordinate pair.
+	 *
+	 * @param mixed $lat Latitude.
+	 * @param mixed $lng Longitude.
+	 * @return bool True if valid geo coordinates.
+	 */
+	public function is_valid_coordinate( mixed $lat, mixed $lng ): bool {
+		if ( ! is_numeric( $lat ) || ! is_numeric( $lng ) ) {
+			return false;
+		}
+		$lat_float = (float) $lat;
+		$lng_float = (float) $lng;
+		return ( $lat_float >= -90.0 && $lat_float <= 90.0 && $lng_float >= -180.0 && $lng_float <= 180.0 );
+	}
+
+	/**
 	 * Attach GPS coordinates and Google Maps navigation URL to WooCommerce order.
 	 *
 	 * @param mixed  $order Order object.
@@ -1041,7 +1057,7 @@ final class WC_Pincode_Checker {
 		$lat = sanitize_text_field( trim( $lat ) );
 		$lng = sanitize_text_field( trim( $lng ) );
 
-		if ( empty( $lat ) || empty( $lng ) ) {
+		if ( empty( $lat ) || empty( $lng ) || ! $this->is_valid_coordinate( $lat, $lng ) ) {
 			return;
 		}
 
@@ -1050,6 +1066,9 @@ final class WC_Pincode_Checker {
 		$order->update_meta_data( '_shipping_latitude', $lat );
 		$order->update_meta_data( '_shipping_longitude', $lng );
 		$order->update_meta_data( '_shipping_google_maps_url', esc_url_raw( $maps_url ) );
+		if ( method_exists( $order, 'save_meta_data' ) ) {
+			$order->save_meta_data();
+		}
 
 		// Bind to customer user profile if customer is logged in
 		$customer_id = method_exists( $order, 'get_customer_id' ) ? (int) $order->get_customer_id() : 0;
@@ -1121,6 +1140,10 @@ final class WC_Pincode_Checker {
 	 * @param mixed $order Order instance.
 	 */
 	public function render_admin_order_gps_dispatch( mixed $order ): void {
+		if ( is_numeric( $order ) || ( is_object( $order ) && ! method_exists( $order, 'get_meta' ) ) ) {
+			$order = wc_get_order( $order );
+		}
+
 		if ( ! is_object( $order ) || ! method_exists( $order, 'get_meta' ) ) {
 			return;
 		}
@@ -1129,7 +1152,7 @@ final class WC_Pincode_Checker {
 		$lng      = (string) $order->get_meta( '_shipping_longitude' );
 		$maps_url = (string) $order->get_meta( '_shipping_google_maps_url' );
 
-		if ( empty( $lat ) || empty( $lng ) ) {
+		if ( empty( $lat ) || empty( $lng ) || ! $this->is_valid_coordinate( $lat, $lng ) ) {
 			return;
 		}
 
@@ -1192,8 +1215,8 @@ final class WC_Pincode_Checker {
 			'shop_order',
 			'shipping_coordinates',
 			array(
-				'get_callback'    => static function ( array $order_data ): ?array {
-					$order_id = (int) ( $order_data['id'] ?? 0 );
+				'get_callback'    => static function ( mixed $order_data ): ?array {
+					$order_id = is_array( $order_data ) ? (int) ( $order_data['id'] ?? 0 ) : ( is_object( $order_data ) ? (int) ( $order_data->ID ?? 0 ) : 0 );
 					if ( $order_id <= 0 ) {
 						return null;
 					}
@@ -1212,15 +1235,22 @@ final class WC_Pincode_Checker {
 						'google_maps_url' => (string) $order->get_meta( '_shipping_google_maps_url' ),
 					);
 				},
-				'update_callback' => static function ( mixed $value, \WC_Order $order ): void {
+				'update_callback' => static function ( mixed $value, mixed $order_obj ): void {
 					if ( is_array( $value ) ) {
+						$order = is_a( $order_obj, 'WC_Order' ) ? $order_obj : wc_get_order( $order_obj );
+						if ( ! is_object( $order ) || ! method_exists( $order, 'update_meta_data' ) ) {
+							return;
+						}
 						$lat = sanitize_text_field( (string) ( $value['latitude'] ?? '' ) );
 						$lng = sanitize_text_field( (string) ( $value['longitude'] ?? '' ) );
-						if ( ! empty( $lat ) && ! empty( $lng ) ) {
+						if ( ! empty( $lat ) && ! empty( $lng ) && is_numeric( $lat ) && is_numeric( $lng ) ) {
 							$maps_url = 'https://www.google.com/maps?q=' . rawurlencode( $lat . ',' . $lng );
 							$order->update_meta_data( '_shipping_latitude', $lat );
 							$order->update_meta_data( '_shipping_longitude', $lng );
 							$order->update_meta_data( '_shipping_google_maps_url', esc_url_raw( $maps_url ) );
+							if ( method_exists( $order, 'save_meta_data' ) ) {
+								$order->save_meta_data();
+							}
 						}
 					}
 				},
@@ -1237,8 +1267,8 @@ final class WC_Pincode_Checker {
 			'customer',
 			'shipping_coordinates',
 			array(
-				'get_callback'    => static function ( array $customer_data ): ?array {
-					$user_id = (int) ( $customer_data['id'] ?? 0 );
+				'get_callback'    => static function ( mixed $customer_data ): ?array {
+					$user_id = is_array( $customer_data ) ? (int) ( $customer_data['id'] ?? 0 ) : ( is_object( $customer_data ) ? (int) ( $customer_data->ID ?? 0 ) : 0 );
 					if ( $user_id <= 0 ) {
 						return null;
 					}
@@ -1253,13 +1283,13 @@ final class WC_Pincode_Checker {
 						'google_maps_url' => (string) get_user_meta( $user_id, 'shipping_google_maps_url', true ),
 					);
 				},
-				'update_callback' => static function ( mixed $value, \WC_Customer $customer ): void {
+				'update_callback' => static function ( mixed $value, mixed $customer_obj ): void {
 					if ( is_array( $value ) ) {
-						$user_id = $customer->get_id();
+						$user_id = is_object( $customer_obj ) && method_exists( $customer_obj, 'get_id' ) ? (int) $customer_obj->get_id() : ( is_object( $customer_obj ) && isset( $customer_obj->ID ) ? (int) $customer_obj->ID : ( is_numeric( $customer_obj ) ? (int) $customer_obj : 0 ) );
 						if ( $user_id > 0 ) {
 							$lat = sanitize_text_field( (string) ( $value['latitude'] ?? '' ) );
 							$lng = sanitize_text_field( (string) ( $value['longitude'] ?? '' ) );
-							if ( ! empty( $lat ) && ! empty( $lng ) ) {
+							if ( ! empty( $lat ) && ! empty( $lng ) && is_numeric( $lat ) && is_numeric( $lng ) ) {
 								$maps_url = 'https://www.google.com/maps?q=' . rawurlencode( $lat . ',' . $lng );
 								update_user_meta( $user_id, 'shipping_latitude', $lat );
 								update_user_meta( $user_id, 'shipping_longitude', $lng );

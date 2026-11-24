@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [1.3.7] - 2026-11-24
+
+### Hardened & Polished
+- **Coordinate Range & Type Validation:** Added `is_valid_coordinate()` helper to strictly validate that latitude (-90 to 90) and longitude (-180 to 180) are genuine floating-point geo coordinates before saving to order meta, user meta, or session.
+- **REST API Type Safety & Immediate Meta Persistence:** Refactored `register_rest_field` for orders and customers to safely handle `mixed` objects (preventing fatal `TypeError` under PHP 8.1 strict types when called with non-array or post objects) and explicitly invoked `$order->save_meta_data()` so coordinates persist to the database immediately.
+- **Stale Coordinate Pollution Prevention:** Hardened frontend JS so manual pincode typing or pasting immediately removes any cached GPS coordinate attributes, guaranteeing that manually typed pincodes never inherit mismatched coordinates from previous geolocation sessions.
+- **Admin Order View Object Guard:** Added defensive resolution in `render_admin_order_gps_dispatch()` so any order ID or legacy post object is safely resolved to a `WC_Order` instance.
+
+---
+
 ## [1.3.6] - 2026-11-24
 
 ### Added & Extended (Cross-Platform Geolocation, REST APIs & Admin GPS Dispatch)

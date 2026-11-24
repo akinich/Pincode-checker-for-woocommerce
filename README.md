@@ -2,7 +2,7 @@
 
 **Author:** Akhil Nichani ([@akinich](https://github.com/akinich))  
 **GitHub Repository:** [akinich/Pincode-checker-for-woocommerce](https://github.com/akinich/Pincode-checker-for-woocommerce)  
-**Version:** 1.3.6  
+**Version:** 1.3.7  
 **Requires WordPress:** 6.7+  
 **Requires WooCommerce:** 8.0+ (Tested up to WooCommerce 11+)  
 **Requires PHP:** 8.1+  
@@ -47,9 +47,9 @@
 
 ## 📦 1-Click Plug-and-Play Installation
 
-1. Download [pincode-checker-for-woocommerce-v1.3.6.zip](file:///Users/akhil/AI%20Coding/Pincode%20Checker%20plugin/pincode-checker-for-woocommerce-v1.3.6.zip).
+1. Download [pincode-checker-for-woocommerce-v1.3.7.zip](file:///Users/akhil/AI%20Coding/Pincode%20Checker%20plugin/pincode-checker-for-woocommerce-v1.3.7.zip).
 2. Go to your WordPress Admin dashboard: **Plugins > Add New > Upload Plugin**.
-3. Choose `pincode-checker-for-woocommerce-v1.3.6.zip` and click **Install Now**.
+3. Choose `pincode-checker-for-woocommerce-v1.3.7.zip` and click **Install Now**.
 4. Click **Activate Plugin**.
 
 ---

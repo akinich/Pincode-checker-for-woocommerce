@@ -1,6 +1,6 @@
 /**
  * Pincode Checker for WooCommerce Frontend Script
- * Version: 1.3.6
+ * Version: 1.3.7
  * Author:  Akhil Nichani (https://github.com/akinich)
  * Handles real-time validation, AJAX checks against WooCommerce Shipping Zones,
  * session & localStorage synchronization, header popovers, mobile delivery strip & bottom sheet,
@@ -302,6 +302,10 @@
 	// 1. Delegated Input Format (Digits Only, max 6) & Clear Button Toggle.
 	$(document).on('input keyup paste', '.wc-pincode-checker-widget .wc-pincode-input', function () {
 		var $input = $(this);
+		var $form = $input.closest('form');
+		// Clear stale detected GPS coordinates when user manually types or modifies pincode
+		$form.removeData('detected-lat').removeData('detected-lng');
+
 		var cleanVal = $input.val().replace(/\D/g, '').slice(0, 6);
 		if ($input.val() !== cleanVal) {
 			$input.val(cleanVal);
@@ -463,14 +467,9 @@
 			pincode: pincode
 		};
 
-		var detLat = $form.data('detected-lat');
-		var detLng = $form.data('detected-lng');
-		if (!detLat || !detLng) {
-			try {
-				detLat = localStorage.getItem(LAT_KEY);
-				detLng = localStorage.getItem(LNG_KEY);
-			} catch (e) {}
-		}
+		// Only bind GPS coordinates if genuinely detected for this specific entry (prevents mismatched coords on manual input)
+		var detLat = $form.data('detected-lat') || '';
+		var detLng = $form.data('detected-lng') || '';
 		if (detLat && detLng) {
 			postData.lat = detLat;
 			postData.lng = detLng;
