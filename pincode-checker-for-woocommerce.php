@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Pincode Checker for WooCommerce
  * Plugin URI:  https://github.com/akinich/Pincode-checker-for-woocommerce
- * Description: Dynamically validates customer pincodes against WooCommerce Shipping Zones (exact codes, ranges, and wildcards) with live session sync, cart recalculation, native Elementor widget, auto-placement settings, mobile delivery strip, prominent 1-click geolocation, and checkout protection.
- * Version:     1.3.5
+ * Description: Dynamically validates customer pincodes against WooCommerce Shipping Zones (exact codes, ranges, and wildcards) with live session sync, cart recalculation, native Elementor widget, auto-placement settings, mobile delivery strip, prominent 1-click geolocation, checkout protection, cross-platform GPS binding, and REST APIs for native mobile apps.
+ * Version:     1.3.6
  * Author:      Akhil Nichani
  * Author URI:  https://github.com/akinich
  * Text Domain: pincode-checker-for-woocommerce
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define Plugin Constants.
-define( 'WC_PINCODE_CHECKER_VERSION', '1.3.5' );
+define( 'WC_PINCODE_CHECKER_VERSION', '1.3.6' );
 define( 'WC_PINCODE_CHECKER_PLUGIN_FILE', __FILE__ );
 define( 'WC_PINCODE_CHECKER_PLUGIN_PATH', plugin_dir_path( __FILE__ ) );
 define( 'WC_PINCODE_CHECKER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -112,6 +112,16 @@ final class WC_Pincode_Checker {
 		// Strict checkout validation: Modern WooCommerce Cart & Checkout Blocks (StoreAPI).
 		add_action( 'woocommerce_store_api_checkout_update_order_from_request', array( $this, 'validate_blocks_checkout' ), 10, 2 );
 
+		// Cross-Platform Geolocation: Order Binding Hooks (Classic & React Blocks).
+		add_action( 'woocommerce_checkout_create_order', array( $this, 'bind_coordinates_to_classic_order' ), 20, 2 );
+		add_action( 'woocommerce_store_api_checkout_update_order_from_request', array( $this, 'bind_coordinates_to_blocks_order' ), 20, 2 );
+
+		// Cross-Platform Geolocation: WP-Admin Order View Dispatch Card.
+		add_action( 'woocommerce_admin_order_data_after_shipping_address', array( $this, 'render_admin_order_gps_dispatch' ), 20, 1 );
+
+		// Cross-Platform Geolocation: REST API Endpoints & Field Registration for Mobile Apps (iOS & Android).
+		add_action( 'rest_api_init', array( $this, 'register_rest_api' ) );
+
 		// Mini-Cart / Slide-Out Cart integration.
 		add_action( 'woocommerce_widget_shopping_cart_before_buttons', array( $this, 'render_minicart_widget' ), 5 );
 
@@ -144,6 +154,12 @@ final class WC_Pincode_Checker {
 		);
 
 		$current_pincode = $this->get_current_pincode();
+		$customer_lat    = ( function_exists( 'WC' ) && WC()->session ) ? (string) WC()->session->get( 'wc_pincode_customer_lat', '' ) : '';
+		$customer_lng    = ( function_exists( 'WC' ) && WC()->session ) ? (string) WC()->session->get( 'wc_pincode_customer_lng', '' ) : '';
+		if ( empty( $customer_lat ) && is_user_logged_in() ) {
+			$customer_lat = (string) get_user_meta( get_current_user_id(), 'shipping_latitude', true );
+			$customer_lng = (string) get_user_meta( get_current_user_id(), 'shipping_longitude', true );
+		}
 
 		wp_localize_script(
 			'wc-pincode-checker',
@@ -152,6 +168,8 @@ final class WC_Pincode_Checker {
 				'ajax_url'           => admin_url( 'admin-ajax.php' ),
 				'nonce'              => wp_create_nonce( 'wc_pincode_checker_nonce' ),
 				'current_pincode'    => $current_pincode,
+				'customer_lat'       => $customer_lat,
+				'customer_lng'       => $customer_lng,
 				'enable_geolocation' => $this->is_geolocation_enabled(),
 				'i18n'               => array(
 					'invalid_pincode'       => __( 'Please enter a valid 6-digit numeric pincode.', 'pincode-checker-for-woocommerce' ),
@@ -808,6 +826,10 @@ final class WC_Pincode_Checker {
 			);
 		}
 
+		// Optional GPS coordinates from 1-click geolocation.
+		$raw_lat = sanitize_text_field( wp_unslash( $_POST['lat'] ?? $_POST['latitude'] ?? '' ) );
+		$raw_lng = sanitize_text_field( wp_unslash( $_POST['lng'] ?? $_POST['lon'] ?? $_POST['longitude'] ?? '' ) );
+
 		// Save to WooCommerce session and customer object.
 		if ( function_exists( 'WC' ) ) {
 			if ( WC()->session ) {
@@ -817,12 +839,26 @@ final class WC_Pincode_Checker {
 					}
 				}
 				WC()->session->set( 'customer_pincode', $pincode );
+				WC()->session->set( 'wc_delivery_pincode', $pincode );
+
+				if ( ! empty( $raw_lat ) && ! empty( $raw_lng ) ) {
+					WC()->session->set( 'wc_pincode_customer_lat', $raw_lat );
+					WC()->session->set( 'wc_pincode_customer_lng', $raw_lng );
+				}
 			}
 
 			if ( WC()->customer ) {
 				WC()->customer->set_shipping_postcode( $pincode );
 				WC()->customer->set_billing_postcode( $pincode );
 				WC()->customer->save();
+			}
+
+			if ( ! empty( $raw_lat ) && ! empty( $raw_lng ) && is_user_logged_in() ) {
+				$user_id  = get_current_user_id();
+				$maps_url = 'https://www.google.com/maps?q=' . rawurlencode( $raw_lat . ',' . $raw_lng );
+				update_user_meta( $user_id, 'shipping_latitude', $raw_lat );
+				update_user_meta( $user_id, 'shipping_longitude', $raw_lng );
+				update_user_meta( $user_id, 'shipping_google_maps_url', esc_url_raw( $maps_url ) );
 			}
 
 			if ( WC()->cart && ! WC()->cart->is_empty() ) {
@@ -840,9 +876,11 @@ final class WC_Pincode_Checker {
 
 		wp_send_json_success(
 			array(
-				'pincode' => $pincode,
-				'message' => apply_filters( 'wc_pincode_success_message', $success_message, $pincode ),
-				'subtext' => $subtext,
+				'pincode'            => $pincode,
+				'message'            => apply_filters( 'wc_pincode_success_message', $success_message, $pincode ),
+				'subtext'            => $subtext,
+				'shipping_latitude'  => $raw_lat,
+				'shipping_longitude' => $raw_lng,
 			)
 		);
 	}
@@ -856,7 +894,13 @@ final class WC_Pincode_Checker {
 		if ( function_exists( 'WC' ) ) {
 			if ( WC()->session ) {
 				WC()->session->set( 'customer_pincode', '' );
+				WC()->session->set( 'wc_delivery_pincode', '' );
+				WC()->session->set( 'wc_pincode_customer_lat', '' );
+				WC()->session->set( 'wc_pincode_customer_lng', '' );
 				WC()->session->__unset( 'customer_pincode' );
+				WC()->session->__unset( 'wc_delivery_pincode' );
+				WC()->session->__unset( 'wc_pincode_customer_lat' );
+				WC()->session->__unset( 'wc_pincode_customer_lng' );
 			}
 
 			if ( WC()->customer ) {
@@ -980,6 +1024,318 @@ final class WC_Pincode_Checker {
 
 			throw new \Exception( $custom_notice );
 		}
+	}
+
+	/**
+	 * Attach GPS coordinates and Google Maps navigation URL to WooCommerce order.
+	 *
+	 * @param mixed  $order Order object.
+	 * @param string $lat   Latitude string or float.
+	 * @param string $lng   Longitude string or float.
+	 */
+	public function attach_coordinates_to_order( mixed $order, string $lat, string $lng ): void {
+		if ( ! is_object( $order ) || ! method_exists( $order, 'update_meta_data' ) ) {
+			return;
+		}
+
+		$lat = sanitize_text_field( trim( $lat ) );
+		$lng = sanitize_text_field( trim( $lng ) );
+
+		if ( empty( $lat ) || empty( $lng ) ) {
+			return;
+		}
+
+		$maps_url = 'https://www.google.com/maps?q=' . rawurlencode( $lat . ',' . $lng );
+
+		$order->update_meta_data( '_shipping_latitude', $lat );
+		$order->update_meta_data( '_shipping_longitude', $lng );
+		$order->update_meta_data( '_shipping_google_maps_url', esc_url_raw( $maps_url ) );
+
+		// Bind to customer user profile if customer is logged in
+		$customer_id = method_exists( $order, 'get_customer_id' ) ? (int) $order->get_customer_id() : 0;
+		if ( $customer_id > 0 ) {
+			update_user_meta( $customer_id, 'shipping_latitude', $lat );
+			update_user_meta( $customer_id, 'shipping_longitude', $lng );
+			update_user_meta( $customer_id, 'shipping_google_maps_url', esc_url_raw( $maps_url ) );
+		}
+	}
+
+	/**
+	 * Hook: Bind GPS coordinates to Classic Checkout order (woocommerce_checkout_create_order).
+	 *
+	 * @param mixed $order Order object.
+	 * @param array $data  Checkout POST data.
+	 */
+	public function bind_coordinates_to_classic_order( mixed $order, array $data ): void {
+		$lat = ( function_exists( 'WC' ) && WC()->session ) ? (string) WC()->session->get( 'wc_pincode_customer_lat', '' ) : '';
+		$lng = ( function_exists( 'WC' ) && WC()->session ) ? (string) WC()->session->get( 'wc_pincode_customer_lng', '' ) : '';
+
+		// Check if passed directly in checkout POST (from custom fields or address book)
+		if ( empty( $lat ) && ! empty( $_POST['shipping_latitude'] ) ) {
+			$lat = sanitize_text_field( wp_unslash( $_POST['shipping_latitude'] ) );
+			$lng = sanitize_text_field( wp_unslash( $_POST['shipping_longitude'] ?? '' ) );
+		}
+
+		// Fallback to customer profile if user is logged in
+		if ( empty( $lat ) && is_user_logged_in() ) {
+			$user_id = get_current_user_id();
+			$lat     = (string) get_user_meta( $user_id, 'shipping_latitude', true );
+			$lng     = (string) get_user_meta( $user_id, 'shipping_longitude', true );
+		}
+
+		$this->attach_coordinates_to_order( $order, $lat, $lng );
+	}
+
+	/**
+	 * Hook: Bind GPS coordinates to modern React Blocks order (woocommerce_store_api_checkout_update_order_from_request).
+	 *
+	 * @param mixed $order   Order object.
+	 * @param mixed $request Store API request.
+	 */
+	public function bind_coordinates_to_blocks_order( mixed $order, mixed $request ): void {
+		$lat = ( function_exists( 'WC' ) && WC()->session ) ? (string) WC()->session->get( 'wc_pincode_customer_lat', '' ) : '';
+		$lng = ( function_exists( 'WC' ) && WC()->session ) ? (string) WC()->session->get( 'wc_pincode_customer_lng', '' ) : '';
+
+		// Check if Store API request contains custom extension data
+		if ( empty( $lat ) && is_object( $request ) && method_exists( $request, 'get_param' ) ) {
+			$shipping_coords = $request->get_param( 'shipping_coordinates' );
+			if ( is_array( $shipping_coords ) ) {
+				$lat = sanitize_text_field( (string) ( $shipping_coords['latitude'] ?? '' ) );
+				$lng = sanitize_text_field( (string) ( $shipping_coords['longitude'] ?? '' ) );
+			}
+		}
+
+		// Fallback to customer profile if user is logged in
+		if ( empty( $lat ) && is_user_logged_in() ) {
+			$user_id = get_current_user_id();
+			$lat     = (string) get_user_meta( $user_id, 'shipping_latitude', true );
+			$lng     = (string) get_user_meta( $user_id, 'shipping_longitude', true );
+		}
+
+		$this->attach_coordinates_to_order( $order, $lat, $lng );
+	}
+
+	/**
+	 * Display exact GPS coordinates and 1-click Google Maps Navigation in WP Admin order view.
+	 *
+	 * @param mixed $order Order instance.
+	 */
+	public function render_admin_order_gps_dispatch( mixed $order ): void {
+		if ( ! is_object( $order ) || ! method_exists( $order, 'get_meta' ) ) {
+			return;
+		}
+
+		$lat      = (string) $order->get_meta( '_shipping_latitude' );
+		$lng      = (string) $order->get_meta( '_shipping_longitude' );
+		$maps_url = (string) $order->get_meta( '_shipping_google_maps_url' );
+
+		if ( empty( $lat ) || empty( $lng ) ) {
+			return;
+		}
+
+		if ( empty( $maps_url ) ) {
+			$maps_url = 'https://www.google.com/maps?q=' . rawurlencode( $lat . ',' . $lng );
+		}
+		?>
+		<div class="wc-pincode-admin-order-gps-card" style="margin-top: 14px; padding: 12px 14px; background: #f4f9f4; border: 1px solid #c2e0c0; border-radius: 8px;">
+			<p style="margin: 0 0 4px; font-weight: 700; color: #2d5a27; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+				<span aria-hidden="true">📍</span> <?php esc_html_e( 'Exact Delivery GPS Coordinates', 'pincode-checker-for-woocommerce' ); ?>
+			</p>
+			<p style="margin: 0 0 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; font-size: 12px; color: #333333; letter-spacing: 0.3px;">
+				<strong><?php esc_html_e( 'Latitude:', 'pincode-checker-for-woocommerce' ); ?></strong> <?php echo esc_html( $lat ); ?> &nbsp;|&nbsp;
+				<strong><?php esc_html_e( 'Longitude:', 'pincode-checker-for-woocommerce' ); ?></strong> <?php echo esc_html( $lng ); ?>
+			</p>
+			<a href="<?php echo esc_url( $maps_url ); ?>" target="_blank" rel="noopener noreferrer" class="button button-small" style="background: #2d5a27; color: #ffffff; border-color: #2d5a27; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; text-decoration: none; padding: 4px 10px; border-radius: 4px;">
+				<span aria-hidden="true">🗺️</span> <?php esc_html_e( 'Navigate via Google Maps', 'pincode-checker-for-woocommerce' ); ?>
+			</a>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Register REST API routes and fields for cross-platform mobile apps (iOS & Android).
+	 */
+	public function register_rest_api(): void {
+		// 1. Deliverability Check Endpoints (Generic route + App-friendly alias)
+		$namespaces = array( 'pincode-checker/v1', 'circlefarms/v1' );
+		foreach ( $namespaces as $ns ) {
+			register_rest_route(
+				$ns,
+				'/check-deliverability',
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'rest_check_deliverability' ),
+					'permission_callback' => '__return_true',
+					'args'                => array(
+						'pincode'   => array(
+							'required'          => true,
+							'type'              => 'string',
+							'sanitize_callback' => 'sanitize_text_field',
+						),
+						'latitude'  => array(
+							'required'          => false,
+							'type'              => array( 'string', 'number' ),
+							'sanitize_callback' => 'sanitize_text_field',
+						),
+						'longitude' => array(
+							'required'          => false,
+							'type'              => array( 'string', 'number' ),
+							'sanitize_callback' => 'sanitize_text_field',
+						),
+					),
+				)
+			);
+		}
+
+		// 2. Extend WooCommerce Orders API (/wp-json/wc/v3/orders)
+		register_rest_field(
+			'shop_order',
+			'shipping_coordinates',
+			array(
+				'get_callback'    => static function ( array $order_data ): ?array {
+					$order_id = (int) ( $order_data['id'] ?? 0 );
+					if ( $order_id <= 0 ) {
+						return null;
+					}
+					$order = wc_get_order( $order_id );
+					if ( ! $order ) {
+						return null;
+					}
+					$lat = (string) $order->get_meta( '_shipping_latitude' );
+					$lng = (string) $order->get_meta( '_shipping_longitude' );
+					if ( empty( $lat ) && empty( $lng ) ) {
+						return null;
+					}
+					return array(
+						'latitude'        => $lat,
+						'longitude'       => $lng,
+						'google_maps_url' => (string) $order->get_meta( '_shipping_google_maps_url' ),
+					);
+				},
+				'update_callback' => static function ( mixed $value, \WC_Order $order ): void {
+					if ( is_array( $value ) ) {
+						$lat = sanitize_text_field( (string) ( $value['latitude'] ?? '' ) );
+						$lng = sanitize_text_field( (string) ( $value['longitude'] ?? '' ) );
+						if ( ! empty( $lat ) && ! empty( $lng ) ) {
+							$maps_url = 'https://www.google.com/maps?q=' . rawurlencode( $lat . ',' . $lng );
+							$order->update_meta_data( '_shipping_latitude', $lat );
+							$order->update_meta_data( '_shipping_longitude', $lng );
+							$order->update_meta_data( '_shipping_google_maps_url', esc_url_raw( $maps_url ) );
+						}
+					}
+				},
+				'schema'          => array(
+					'description' => __( 'Delivery GPS coordinates and Google Maps navigation link', 'pincode-checker-for-woocommerce' ),
+					'type'        => 'object',
+					'context'     => array( 'view', 'edit' ),
+				),
+			)
+		);
+
+		// 3. Extend WooCommerce Customers API (/wp-json/wc/v3/customers)
+		register_rest_field(
+			'customer',
+			'shipping_coordinates',
+			array(
+				'get_callback'    => static function ( array $customer_data ): ?array {
+					$user_id = (int) ( $customer_data['id'] ?? 0 );
+					if ( $user_id <= 0 ) {
+						return null;
+					}
+					$lat = (string) get_user_meta( $user_id, 'shipping_latitude', true );
+					$lng = (string) get_user_meta( $user_id, 'shipping_longitude', true );
+					if ( empty( $lat ) && empty( $lng ) ) {
+						return null;
+					}
+					return array(
+						'latitude'        => $lat,
+						'longitude'       => $lng,
+						'google_maps_url' => (string) get_user_meta( $user_id, 'shipping_google_maps_url', true ),
+					);
+				},
+				'update_callback' => static function ( mixed $value, \WC_Customer $customer ): void {
+					if ( is_array( $value ) ) {
+						$user_id = $customer->get_id();
+						if ( $user_id > 0 ) {
+							$lat = sanitize_text_field( (string) ( $value['latitude'] ?? '' ) );
+							$lng = sanitize_text_field( (string) ( $value['longitude'] ?? '' ) );
+							if ( ! empty( $lat ) && ! empty( $lng ) ) {
+								$maps_url = 'https://www.google.com/maps?q=' . rawurlencode( $lat . ',' . $lng );
+								update_user_meta( $user_id, 'shipping_latitude', $lat );
+								update_user_meta( $user_id, 'shipping_longitude', $lng );
+								update_user_meta( $user_id, 'shipping_google_maps_url', esc_url_raw( $maps_url ) );
+							}
+						}
+					}
+				},
+				'schema'          => array(
+					'description' => __( 'Customer default shipping GPS rooftop coordinates', 'pincode-checker-for-woocommerce' ),
+					'type'        => 'object',
+					'context'     => array( 'view', 'edit' ),
+				),
+			)
+		);
+	}
+
+	/**
+	 * REST API Callback: Check Deliverability.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 * @return \WP_REST_Response
+	 */
+	public function rest_check_deliverability( \WP_REST_Request $request ): \WP_REST_Response {
+		$raw_pincode = (string) $request->get_param( 'pincode' );
+		$pincode     = preg_replace( '/\D/', '', $raw_pincode );
+
+		if ( 6 !== strlen( $pincode ) ) {
+			return new \WP_REST_Response(
+				array(
+					'success'     => false,
+					'serviceable' => false,
+					'message'     => __( 'Please enter a valid 6-digit numeric pincode.', 'pincode-checker-for-woocommerce' ),
+				),
+				400
+			);
+		}
+
+		$is_serviceable = $this->is_pincode_serviceable( $pincode );
+		$lat            = sanitize_text_field( (string) ( $request->get_param( 'latitude' ) ?? '' ) );
+		$lng            = sanitize_text_field( (string) ( $request->get_param( 'longitude' ) ?? '' ) );
+		$maps_url       = ( ! empty( $lat ) && ! empty( $lng ) ) ? 'https://www.google.com/maps?q=' . rawurlencode( $lat . ',' . $lng ) : '';
+
+		if ( ! $is_serviceable ) {
+			$fail_template = get_option(
+				'wc_pincode_fail_msg',
+				__( '❌ Sorry, we do not deliver to %s yet.', 'pincode-checker-for-woocommerce' )
+			);
+			return new \WP_REST_Response(
+				array(
+					'success'     => false,
+					'serviceable' => false,
+					'pincode'     => $pincode,
+					'message'     => sprintf( $fail_template, $pincode ),
+				),
+				200
+			);
+		}
+
+		$success_template = get_option(
+			'wc_pincode_success_msg',
+			__( '✅ Great news! We deliver to %s.', 'pincode-checker-for-woocommerce' )
+		);
+
+		return new \WP_REST_Response(
+			array(
+				'success'            => true,
+				'serviceable'        => true,
+				'pincode'            => $pincode,
+				'message'            => sprintf( $success_template, $pincode ),
+				'shipping_latitude'  => $lat,
+				'shipping_longitude' => $lng,
+				'google_maps_url'    => $maps_url,
+			),
+			200
+		);
 	}
 
 	/**

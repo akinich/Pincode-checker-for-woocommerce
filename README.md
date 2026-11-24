@@ -2,13 +2,13 @@
 
 **Author:** Akhil Nichani ([@akinich](https://github.com/akinich))  
 **GitHub Repository:** [akinich/Pincode-checker-for-woocommerce](https://github.com/akinich/Pincode-checker-for-woocommerce)  
-**Version:** 1.3.5  
+**Version:** 1.3.6  
 **Requires WordPress:** 6.7+  
 **Requires WooCommerce:** 8.0+ (Tested up to WooCommerce 11+)  
 **Requires PHP:** 8.1+  
 **Elementor Compatible:** Yes (Elementor 3.0+)  
 **Theme Compatibility:** Compatible with Freshio, Astra, WoodMart, Storefront & Standard WordPress Themes  
-**Cart & Checkout Blocks Compatible:** Yes (Full StoreAPI RouteException integration)  
+**Cart & Checkout Blocks Compatible:** Yes (Full StoreAPI RouteException & Order Hook integration)  
 **License:** GPL-2.0-or-later  
 
 ---
@@ -19,9 +19,16 @@
 
 ### Key Highlights:
 * 🎯 **Single Source of Truth:** Reads directly from WooCommerce Shipping Zones (`WC_Shipping_Zones`). Store managers only maintain delivery postcodes in standard WooCommerce Shipping settings.
-* 📍 **Prominent 1-Click Browser Geolocation ("Use My Current Location"):** Features a dedicated, full-width primary action button with an "OR" divider positioned right above the manual pincode input. Features a clean mint background, GPS crosshair icon, and unmistakable button label: **"Use My Current Location"**. Eliminates in-input icon crowding and ensures the placeholder `"Enter 6-digit pincode"` is never truncated.
-* 🛡️ **Hardened Geolocation & Network Resilience:** Features an HTTPS Secure Context guard (`window.isSecureContext`), deep hierarchy candidate parsing (BigDataCloud primary + OpenStreetMap Nominatim fallback), and snappy 5-second provider failover.
-* 📱 **Native Mobile Delivery Strip & Slide-Up Bottom Sheet:** Automatically displays a slim, elegant location strip (`📍 Delivering to 600031 · (Change)` or `Select your delivery pincode`) below the header on mobile/tablet devices (`<= 991px`). Tapping opens a modern slide-up bottom sheet with an iOS-style drag handle bar and a **semi-transparent dimmed backdrop overlay** (`rgba(0,0,0,0.45)`) that dims and blurs background contents. Tapping the backdrop smoothly dismisses the sheet.
+* 📍 **Prominent 1-Click Browser Geolocation ("Use My Current Location"):** Features a dedicated, full-width primary action button with an "OR" divider positioned right above the manual pincode input. Features a clean mint background, GPS crosshair icon, and unmistakable button label: **"Use My Current Location"**.
+* 🌐 **Cross-Platform GPS Coordinates & Rooftop Precision:** Automatically captures device latitude & longitude when geolocation is used. Persists coordinates across browser session, local storage, and binds them to the order upon checkout.
+* 🗺️ **1-Click Google Maps Dispatch Link:** Automatically generates a direct navigation URL (`https://www.google.com/maps?q=lat,lng`) stored in order metadata (`_shipping_google_maps_url`) for driver navigation.
+* 🚚 **WP-Admin Dispatch Dashboard:** Displays an unmistakable green delivery dispatch card inside **WooCommerce > Orders > Order Details** (below the Shipping Address) featuring the exact latitude/longitude and a 1-click **"Navigate via Google Maps"** button.
+* 🔌 **REST API Architecture for Native Mobile Apps (iOS & Android):**
+  * `POST /wp-json/pincode-checker/v1/check-deliverability` (and alias `/wp-json/circlefarms/v1/check-deliverability`): Accepts `{ pincode, latitude, longitude }` and returns real-time deliverability status, city, and Google Maps URL.
+  * Extends standard `/wp-json/wc/v3/orders` via `register_rest_field` to read and write `shipping_coordinates`.
+  * Extends standard `/wp-json/wc/v3/customers` to persist rooftop coordinates to customer address profiles.
+* 🛡️ **Dual-Engine Checkout Binding:** Automatically binds GPS coordinates to orders on **both** classic shortcode checkout (`woocommerce_checkout_create_order`) and modern WooCommerce React Cart & Checkout Blocks (`woocommerce_store_api_checkout_update_order_from_request`).
+* 📱 **Native Mobile Delivery Strip & Slide-Up Bottom Sheet:** Automatically displays a slim, elegant location strip (`📍 Delivering to 600031 · (Change)` or `Select your delivery pincode`) below the header on mobile/tablet devices (`<= 991px`). Tapping opens a modern slide-up bottom sheet with an iOS-style drag handle bar and a **semi-transparent dimmed backdrop overlay** (`rgba(0,0,0,0.45)`).
 * ⚡ **Advanced Postcode Rule Matching:** Evaluates exact postcodes (`600028`), numeric ranges (`600001...600120` and `600001-600120`), comma-separated entries, and wildcards (`600*`).
 * 🧩 **Native Elementor Widget:** Appears automatically in Elementor's widget panel as **"Pincode Deliverability Checker"** with drag-and-drop support, style controls (Popover, Inline Standard, Compact), and live preview.
 * 🚀 **100% Plug-and-Play Auto-Placement Settings:** Configurable from **WooCommerce > Settings > Shipping > Pincode Checker**:
@@ -31,19 +38,18 @@
   * **Product Page Placement:** Above 'Add to Cart' | Below 'Add to Cart' | Off.
   * **Mini-Cart Placement:** Enable in slide-out cart drawer (Yes/No).
 * 🎨 **Theme Interceptor Polish:** Built-in suppression for theme-prefixed Icon Box classes (`.elementor-widget-freshio2-icon-box` and `.elementor-icon-box-wrapper`), eliminating ghost/redundant pin icons in the header.
-* 🔄 **Seamless Location Reset & Text Selection:** Clicking the header trigger or mobile strip automatically focuses and selects all text in the input box so typing immediately overwrites the existing pincode. A dedicated **"Reset / Clear Location"** action completely resets sessions and customer location across the cart and checkout.
+* 🔄 **Seamless Location Reset & Text Selection:** Clicking the header trigger or mobile strip automatically focuses and selects all text in the input box so typing immediately overwrites the existing pincode. A dedicated **"Reset / Clear Location"** action completely resets sessions, customer location, and cached coordinates across the cart and checkout.
 * 🛒 **Real-Time Cart & Shipping Sync:** Automatically sets `WC()->customer` shipping/billing postcode upon verification, enabling AJAX slide-out carts to update shipping totals and free-delivery thresholds instantly.
 * 📍 **Header Popover Dropdown UI:** Dedicated header trigger button (`Check Deliverability` or `Delivering to [Pincode] (Change)`) with an elegant, non-colliding popover card floating above hero sliders (`z-index: 9999999`).
-* 🔒 **Double-Layer Checkout Protection & Digital Goods Exemption:** Protects **both** classic shortcode checkout (`woocommerce_after_checkout_validation`) and modern WooCommerce Cart & Checkout Blocks (`woocommerce_store_api_checkout_update_order_from_request`), with automatic bypass for virtual/downloadable products that do not require physical shipping.
-* 🛡️ **Defensive Architecture:** Elementor visual editor protection (preserves live editor controls), safe regex text-node replacement (`preg_replace_callback`), and delegated event listeners for dynamic mini-carts.
+* 🔒 **Double-Layer Checkout Protection & Digital Goods Exemption:** Protects **both** classic shortcode checkout and modern WooCommerce Cart & Checkout Blocks, with automatic bypass for virtual/downloadable products that do not require physical shipping.
 
 ---
 
 ## 📦 1-Click Plug-and-Play Installation
 
-1. Download [pincode-checker-for-woocommerce-v1.3.5.zip](file:///Users/akhil/AI%20Coding/Pincode%20Checker%20plugin/pincode-checker-for-woocommerce-v1.3.5.zip).
+1. Download [pincode-checker-for-woocommerce-v1.3.6.zip](file:///Users/akhil/AI%20Coding/Pincode%20Checker%20plugin/pincode-checker-for-woocommerce-v1.3.6.zip).
 2. Go to your WordPress Admin dashboard: **Plugins > Add New > Upload Plugin**.
-3. Choose `pincode-checker-for-woocommerce-v1.3.5.zip` and click **Install Now**.
+3. Choose `pincode-checker-for-woocommerce-v1.3.6.zip` and click **Install Now**.
 4. Click **Activate Plugin**.
 
 ---

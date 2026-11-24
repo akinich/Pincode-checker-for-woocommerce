@@ -5,6 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [1.3.6] - 2026-11-24
+
+### Added & Extended (Cross-Platform Geolocation, REST APIs & Admin GPS Dispatch)
+- **Automatic GPS Coordinates Capture & Order Binding:** Automatically captures rooftop latitude & longitude when 1-click geolocation is used, persists coordinates to WooCommerce session (`wc_pincode_customer_lat`, `wc_pincode_customer_lng`) and client `localStorage`, and binds them to the order upon checkout.
+- **Dual Checkout Coverage:** Implemented hooks for both Classic Checkout (`woocommerce_checkout_create_order`) and modern WooCommerce React Cart & Checkout Blocks (`woocommerce_store_api_checkout_update_order_from_request`) to store `_shipping_latitude`, `_shipping_longitude`, and `_shipping_google_maps_url`.
+- **Customer Profile Address Binding:** Persists verified GPS coordinates to registered customer user meta (`shipping_latitude`, `shipping_longitude`, `shipping_google_maps_url`) for seamless multi-order and multi-address reuse.
+- **WP-Admin GPS Dispatch Card:** Injected a prominent green dispatch card inside **WooCommerce > Orders > Order Details** (below the Shipping Address) displaying exact coordinates and a 1-click **"Navigate via Google Maps"** navigation button for drivers and logistics staff.
+- **Cross-Platform REST APIs for Mobile Apps (iOS & Android):**
+  - Registered `POST /wp-json/pincode-checker/v1/check-deliverability` (with alias `/wp-json/circlefarms/v1/check-deliverability`) accepting `{ pincode, latitude, longitude }` and returning deliverability status, city, coordinates, and navigation URL.
+  - Extended standard WooCommerce Orders API (`/wp-json/wc/v3/orders`) via `register_rest_field` to support reading and writing `shipping_coordinates`.
+  - Extended standard WooCommerce Customers API (`/wp-json/wc/v3/customers`) to expose customer profile GPS coordinates.
+- **Clean Invalidation:** Updated `wc_clear_pincode` to cleanly flush coordinates from session and `localStorage` when "Reset / Clear Location" is clicked.
+
+---
+
 ## [1.3.5] - 2026-11-24
 
 ### Hardened & Improved

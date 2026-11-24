@@ -1,10 +1,10 @@
 /**
  * Pincode Checker for WooCommerce Frontend Script
- * Version: 1.3.5
+ * Version: 1.3.6
  * Author:  Akhil Nichani (https://github.com/akinich)
  * Handles real-time validation, AJAX checks against WooCommerce Shipping Zones,
  * session & localStorage synchronization, header popovers, mobile delivery strip & bottom sheet,
- * prominent 1-click browser geolocation, auto-focus text selection, and one-click location reset.
+ * prominent 1-click browser geolocation, cross-platform GPS coordinate storage, auto-focus text selection, and one-click location reset.
  * Uses robust delegated event listeners.
  */
 
@@ -12,6 +12,8 @@
 	'use strict';
 
 	var STORAGE_KEY = 'wc_verified_pincode';
+	var LAT_KEY = 'wc_pincode_customer_lat';
+	var LNG_KEY = 'wc_pincode_customer_lng';
 	var params = window.wc_pincode_params || {};
 
 	/**
@@ -33,14 +35,20 @@
 	}
 
 	/**
-	 * Save verified pincode to client-side localStorage.
+	 * Save verified pincode and optional GPS coordinates to client-side localStorage.
 	 */
-	function setActivePincode(pincode) {
+	function setActivePincode(pincode, lat, lng) {
 		try {
 			if (pincode) {
 				localStorage.setItem(STORAGE_KEY, pincode);
+				if (lat && lng) {
+					localStorage.setItem(LAT_KEY, String(lat));
+					localStorage.setItem(LNG_KEY, String(lng));
+				}
 			} else {
 				localStorage.removeItem(STORAGE_KEY);
+				localStorage.removeItem(LAT_KEY);
+				localStorage.removeItem(LNG_KEY);
 			}
 		} catch (e) {
 			// LocalStorage unavailable.
@@ -48,15 +56,19 @@
 	}
 
 	/**
-	 * Clear verified pincode from client-side storage.
+	 * Clear verified pincode and GPS coordinates from client-side storage.
 	 */
 	function clearActivePincode() {
 		try {
 			localStorage.removeItem(STORAGE_KEY);
+			localStorage.removeItem(LAT_KEY);
+			localStorage.removeItem(LNG_KEY);
 		} catch (e) {
 			// LocalStorage unavailable.
 		}
 		params.current_pincode = '';
+		params.customer_lat = '';
+		params.customer_lng = '';
 	}
 
 	/**
@@ -368,11 +380,18 @@
 				var lat = position.coords.latitude;
 				var lon = position.coords.longitude;
 
+				try {
+					localStorage.setItem(LAT_KEY, String(lat));
+					localStorage.setItem(LNG_KEY, String(lon));
+				} catch (e) {}
+
 				reverseGeocode(
 					lat,
 					lon,
 					function (postcode) {
 						resetGeoButton();
+						$form.data('detected-lat', String(lat));
+						$form.data('detected-lng', String(lon));
 						$input.val(postcode).trigger('input');
 						$form.trigger('submit');
 					},
@@ -438,21 +457,36 @@
 			true
 		);
 
+		var postData = {
+			action: 'wc_check_pincode',
+			nonce: params.nonce,
+			pincode: pincode
+		};
+
+		var detLat = $form.data('detected-lat');
+		var detLng = $form.data('detected-lng');
+		if (!detLat || !detLng) {
+			try {
+				detLat = localStorage.getItem(LAT_KEY);
+				detLng = localStorage.getItem(LNG_KEY);
+			} catch (e) {}
+		}
+		if (detLat && detLng) {
+			postData.lat = detLat;
+			postData.lng = detLng;
+		}
+
 		$.ajax({
 			url: params.ajax_url || '/wp-admin/admin-ajax.php',
 			type: 'POST',
 			dataType: 'json',
-			data: {
-				action: 'wc_check_pincode',
-				nonce: params.nonce,
-				pincode: pincode
-			},
+			data: postData,
 			success: function (res) {
 				$submitBtn.removeClass('is-loading').prop('disabled', false);
 
 				if (res && res.success && res.data) {
 					var data = res.data;
-					setActivePincode(data.pincode);
+					setActivePincode(data.pincode, detLat, detLng);
 					params.current_pincode = data.pincode;
 
 					showResultMessage($widget, data.message, true, data.subtext || '');
